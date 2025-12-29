@@ -1,0 +1,99 @@
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+
+-- Configurações
+local FOLLOW_DISTANCE = 5 -- Distância para parar perto do alvo
+local UPDATE_INTERVAL = 1 -- Atualizar o caminho a cada X segundos
+
+-- Lista de jogadores disponíveis para seguir
+local availablePlayers = {} -- Adicione nomes de jogadores aqui
+-- Exemplo: {"Player1", "Player2"}
+
+-- Variáveis do script
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+local targetPlayer = nil
+local currentPath = nil
+local lastUpdate = 0
+
+-- Função para encontrar um jogador alvo
+local function findTargetPlayer()
+    for _, playerName in ipairs(availablePlayers) do
+        local target = Players:FindFirstChild(playerName)
+        if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
+            return target
+        end
+    end
+    return nil
+end
+
+-- Função para seguir o caminho
+local function followPath()
+    if not targetPlayer or not targetPlayer.Character then return end
+    
+    local targetRoot = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return end
+    
+    -- Calcular distância até o alvo
+    local distance = (rootPart.Position - targetRoot.Position).Magnitude
+    
+    -- Se estiver muito perto, parar
+    if distance <= FOLLOW_DISTANCE then
+        humanoid:MoveTo(rootPart.Position)
+        return
+    end
+    
+    -- Atualizar caminho periodicamente
+    if tick() - lastUpdate > UPDATE_INTERVAL then
+        lastUpdate = tick()
+        
+        -- Criar novo caminho
+        local path = PathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            AgentCanClimb = true
+        })
+        
+        -- Calcular caminho
+        path:ComputeAsync(rootPart.Position, targetRoot.Position)
+        
+        if path.Status == Enum.PathStatus.Success then
+            currentPath = path
+            
+            -- Obter waypoints do caminho
+            local waypoints = path:GetWaypoints()
+            
+            -- Seguir para cada waypoint
+            for _, waypoint in ipairs(waypoints) do
+                if waypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+                
+                humanoid:MoveTo(waypoint.Position)
+                humanoid.MoveToFinished:Wait()
+            end
+        else
+            -- Se não encontrar caminho, tentar ir direto
+            humanoid:MoveTo(targetRoot.Position)
+        end
+    end
+end
+
+-- Loop principal para seguir o jogador
+while true do
+    -- Encontrar um alvo se não tiver um
+    if not targetPlayer then
+        targetPlayer = findTargetPlayer()
+    end
+    
+    -- Se encontrou um alvo, seguir
+    if targetPlayer then
+        followPath()
+    end
+    
+    wait(0.1)
+end
