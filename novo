@@ -1,0 +1,95 @@
+-- LocalScript
+
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local tempFolder = workspace:WaitForChild("Temp")
+
+-- =========================
+-- UI
+-- =========================
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "PresentVisionGUI"
+screenGui.ResetOnSpawn = false
+screenGui.Parent = playerGui
+
+local button = Instance.new("TextButton")
+button.Size = UDim2.new(0, 200, 0, 50)
+button.Position = UDim2.new(0, 20, 0.5, -25)
+button.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+button.TextColor3 = Color3.fromRGB(255, 255, 255)
+button.Text = "🎁 Ver Presentes"
+button.Font = Enum.Font.GothamBold
+button.TextSize = 18
+button.Parent = screenGui
+
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(0, 12)
+corner.Parent = button
+
+-- =========================
+-- Highlight System
+-- =========================
+local enabled = false
+local highlights = {}
+
+local function createHighlight(model)
+	if not enabled then return end
+	if not model:IsA("Model") then return end
+	if model:FindFirstChild("PresentHighlight") then return end
+
+	if not model.PrimaryPart then
+		model.PrimaryPart = model:FindFirstChildWhichIsA("BasePart")
+	end
+	if not model.PrimaryPart then return end
+
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "PresentHighlight"
+	highlight.Adornee = model
+	highlight.FillColor = Color3.fromRGB(0, 255, 100)
+	highlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+	highlight.FillTransparency = 0.5
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	highlight.Parent = model
+
+	highlights[model] = highlight
+end
+
+local function enableVision()
+	for _, obj in ipairs(tempFolder:GetChildren()) do
+		createHighlight(obj)
+	end
+	button.Text = "❌ Ocultar Presentes"
+end
+
+local function disableVision()
+	for model, highlight in pairs(highlights) do
+		if highlight then
+			highlight:Destroy()
+		end
+	end
+	highlights = {}
+	button.Text = "🎁 Ver Presentes"
+end
+
+-- =========================
+-- Detect new models in Temp
+-- =========================
+tempFolder.ChildAdded:Connect(function(child)
+	task.wait() -- garante que o modelo carregou
+	createHighlight(child)
+end)
+
+-- =========================
+-- Button Click
+-- =========================
+button.MouseButton1Click:Connect(function()
+	enabled = not enabled
+
+	if enabled then
+		enableVision()
+	else
+		disableVision()
+	end
+end)
