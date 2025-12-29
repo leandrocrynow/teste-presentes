@@ -1,0 +1,226 @@
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+-- Configurações
+local FOLLOW_DISTANCE = 5
+local UPDATE_INTERVAL = 0.5
+local isFollowing = false
+local targetPlayer = nil
+
+-- Criar UI
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowerUI"
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 300)
+frame.Position = UDim2.new(0, 10, 0, 10)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Text = "Seguir Jogador"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+title.TextColor3 = Color3.white
+title.Parent = frame
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -10, 0, 200)
+scrollFrame.Position = UDim2.new(0, 5, 0, 35)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.Parent = frame
+
+local followButton = Instance.new("TextButton")
+followButton.Text = "COMEÇAR A SEGUIR"
+followButton.Size = UDim2.new(1, -10, 0, 30)
+followButton.Position = UDim2.new(0, 5, 0, 240)
+followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+followButton.TextColor3 = Color3.white
+followButton.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Text = "Status: Parado"
+statusLabel.Size = UDim2.new(1, -10, 0, 20)
+statusLabel.Position = UDim2.new(0, 5, 0, 275)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.white
+statusLabel.Parent = frame
+
+screenGui.Parent = playerGui
+
+-- Variáveis do pathfinding
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+local currentPath = nil
+local lastUpdate = 0
+
+-- Atualizar lista de jogadores
+local function updatePlayerList()
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local yOffset = 0
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= player then
+            local playerButton = Instance.new("TextButton")
+            playerButton.Text = otherPlayer.Name
+            playerButton.Size = UDim2.new(1, 0, 0, 25)
+            playerButton.Position = UDim2.new(0, 0, 0, yOffset)
+            playerButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            playerButton.TextColor3 = Color3.white
+            
+            playerButton.MouseButton1Click:Connect(function()
+                if targetPlayer == otherPlayer then
+                    targetPlayer = nil
+                    playerButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                else
+                    targetPlayer = otherPlayer
+                    -- Resetar cor de todos os botões
+                    for _, btn in ipairs(scrollFrame:GetChildren()) do
+                        if btn:IsA("TextButton") then
+                            btn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                        end
+                    end
+                    playerButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+                end
+            end)
+            
+            playerButton.Parent = scrollFrame
+            yOffset = yOffset + 27
+        end
+    end
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, yOffset)
+end
+
+-- Controle do botão de seguir
+followButton.MouseButton1Click:Connect(function()
+    if not targetPlayer then
+        statusLabel.Text = "Selecione um jogador primeiro!"
+        return
+    end
+    
+    isFollowing = not isFollowing
+    
+    if isFollowing then
+        followButton.Text = "PARAR DE SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        statusLabel.Text = "Seguindo: " .. targetPlayer.Name
+    else
+        followButton.Text = "COMEÇAR A SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        statusLabel.Text = "Status: Parado"
+        humanoid:MoveTo(rootPart.Position) -- Parar movimento
+    end
+end)
+
+-- Função de pathfinding
+local function followPath()
+    if not isFollowing or not targetPlayer then return end
+    
+    local targetChar = targetPlayer.Character
+    if not targetChar then 
+        statusLabel.Text = "Alvo sem personagem"
+        return 
+    end
+    
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return end
+    
+    -- Verificar distância
+    local distance = (rootPart.Position - targetRoot.Position).Magnitude
+    if distance <= FOLLOW_DISTANCE then
+        humanoid:MoveTo(rootPart.Position)
+        return
+    end
+    
+    -- Atualizar caminho periodicamente
+    if tick() - lastUpdate > UPDATE_INTERVAL then
+        lastUpdate = tick()
+        
+        -- Criar novo caminho
+        local path = PathfindingService:CreatePath({
+            AgentRadius = 2,
+            AgentHeight = 5,
+            AgentCanJump = true,
+            AgentCanClimb = true,
+            WaypointSpacing = 4,
+            Costs = {
+                Water = 20,
+                Lava = math.huge
+            }
+        })
+        
+        -- Calcular caminho
+        local success, errorMsg = pcall(function()
+            path:ComputeAsync(rootPart.Position, targetRoot.Position)
+        end)
+        
+        if success and path.Status == Enum.PathStatus.Success then
+            local waypoints = path:GetWaypoints()
+            
+            -- Seguir para o primeiro waypoint
+            for i, waypoint in ipairs(waypoints) do
+                if not isFollowing or not targetPlayer then break end
+                
+                if waypoint.Action == Enum.PathWaypointAction.Jump then
+                    humanoid.Jump = true
+                end
+                
+                humanoid:MoveTo(waypoint.Position)
+                
+                -- Esperar chegar ou timeout
+                local reached = humanoid.MoveToFinished:Wait(1)
+                if not reached then
+                    break -- Tentar novo caminho
+                end
+            end
+        else
+            -- Fallback: mover diretamente
+            humanoid:MoveTo(targetRoot.Position)
+        end
+    end
+end
+
+-- Atualizar quando jogadores entrarem/saírem
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer == targetPlayer then
+        targetPlayer = nil
+        isFollowing = false
+        followButton.Text = "COMEÇAR A SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        statusLabel.Text = "Alvo saiu do jogo"
+    end
+    updatePlayerList()
+end)
+
+-- Loop principal
+local connection
+connection = RunService.Heartbeat:Connect(function()
+    if not character or not character.Parent then
+        character = player.Character or player.CharacterAdded:Wait()
+        humanoid = character:WaitForChild("Humanoid")
+        rootPart = character:WaitForChild("HumanoidRootPart")
+    end
+    
+    followPath()
+end)
+
+-- Inicializar
+updatePlayerList()
+
+-- Limpeza quando o script for destruído
+game:GetService("Players").LocalPlayer.CharacterRemoving:Connect(function()
+    if connection then
+        connection:Disconnect()
+    end
+end)
