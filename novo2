@@ -1,0 +1,523 @@
+-- Coloque este script em um LocalScript dentro de um ScreenGui
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Lighting = game:GetService("Lighting")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Criação da interface
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "XRayGiftsGUI"
+screenGui.Parent = playerGui
+screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+-- Botão principal
+local mainButton = Instance.new("TextButton")
+mainButton.Name = "XRayButton"
+mainButton.Size = UDim2.new(0, 180, 0, 60)
+mainButton.Position = UDim2.new(1, -190, 1, -70)
+mainButton.AnchorPoint = Vector2.new(0, 0)
+mainButton.BackgroundColor3 = Color3.fromRGB(0, 100, 255)
+mainButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+mainButton.Text = "🔍 X-RAY Presentes"
+mainButton.Font = Enum.Font.FredokaOne
+mainButton.TextSize = 20
+mainButton.BorderSizePixel = 0
+mainButton.AutoButtonColor = true
+mainButton.Parent = screenGui
+
+-- Estilização do botão
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 15)
+uiCorner.Parent = mainButton
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(255, 255, 0)
+uiStroke.Thickness = 3
+uiStroke.Parent = mainButton
+
+-- Botão para modo de visão avançada
+local advancedButton = Instance.new("TextButton")
+advancedButton.Name = "AdvancedViewButton"
+advancedButton.Size = UDim2.new(0, 40, 0, 40)
+advancedButton.Position = UDim2.new(1, -50, 1, -130)
+advancedButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+advancedButton.Text = "👁️"
+advancedButton.TextColor3 = Color3.white
+advancedButton.Font = Enum.Font.FredokaOne
+advancedButton.TextSize = 24
+advancedButton.AutoButtonColor = true
+advancedButton.Visible = false
+advancedButton.Parent = screenGui
+
+UICorner.new():Clone().Parent = advancedButton
+
+-- Variáveis de controle
+local isXRayActive = false
+local isAdvancedView = false
+local giftsFolder = nil
+local originalProperties = {}
+local xRayParts = {}
+local highlightInstances = {}
+local wallCache = {}
+
+-- Configurações
+local XRAY_SETTINGS = {
+	WALL_TRANSPARENCY = 0.95, -- Paredes quase transparentes
+	WALL_COLOR = Color3.fromRGB(100, 100, 100), -- Cor das paredes transparentes
+	GIFT_COLORS = {
+		Color3.fromRGB(255, 50, 50),    -- Vermelho
+		Color3.fromRGB(50, 255, 50),    -- Verde
+		Color3.fromRGB(50, 100, 255),   -- Azul
+		Color3.fromRGB(255, 255, 50),   -- Amarelo
+		Color3.fromRGB(255, 100, 255)   -- Rosa
+	},
+	GLOW_INTENSITY = 10,
+	UPDATE_RATE = 0.1 -- Atualização a cada 100ms
+}
+
+-- Função para obter a pasta temp
+local function getTempFolder()
+	local workspace = game:GetService("Workspace")
+	
+	if workspace:FindFirstChild("temp") then
+		return workspace.temp
+	else
+		warn("Pasta 'temp' não encontrada no Workspace!")
+		return nil
+	end
+end
+
+-- Função para encontrar todas as paredes
+local function findWalls()
+	local walls = {}
+	local workspace = game:GetService("Workspace")
+	
+	for _, part in pairs(workspace:GetDescendants()) do
+		if part:IsA("BasePart") then
+			local isWall = part.Name:lower():find("wall") or
+						  part.Name:lower():find("parede") or
+						  part.Name:lower():find("muro") or
+						  part.Name:lower():find("floor") or
+						  part.Name:lower():find("chão") or
+						  part.Name:lower():find("roof") or
+						  part.Name:lower():find("teto") or
+						  part.Name:lower():find("ceiling") or
+						  part:FindFirstAncestorWhichIsA("Model") and 
+						  (part:FindFirstAncestorWhichIsA("Model").Name:lower():find("wall") or
+						   part:FindFirstAncestorWhichIsA("Model").Name:lower():find("house") or
+						   part:FindFirstAncestorWhichIsA("Model").Name:lower():find("building"))
+			
+			if isWall and part.Transparency < 0.5 then
+				table.insert(walls, part)
+			end
+		end
+	end
+	
+	print(#walls .. " paredes encontradas")
+	return walls
+end
+
+-- Função para criar efeito X-Ray nas paredes
+local function applyXRayToWalls(enable)
+	local walls = findWalls()
+	
+	if enable then
+		-- Salva propriedades originais e aplica X-Ray
+		for _, wall in pairs(walls) do
+			if not originalProperties[wall] then
+				originalProperties[wall] = {
+					Transparency = wall.Transparency,
+					Color = wall.Color,
+					Material = wall.Material,
+					CanCollide = wall.CanCollide
+				}
+			end
+			
+			-- Torna a parede quase transparente
+			wall.Transparency = XRAY_SETTINGS.WALL_TRANSPARENCY
+			wall.Color = XRAY_SETTINGS.WALL_COLOR
+			wall.Material = Enum-material.Glass
+			wall.CanCollide = true -- Mantém colisão
+			
+			-- Adiciona efeito de brilho suave
+			local surfaceGui = Instance.new("SurfaceGui")
+			surfaceGui.Name = "XRayEffect"
+			surfaceGui.Face = Enum.NormalId.Top
+			surfaceGui.AlwaysOnTop = true
+			surfaceGui.Brightness = 0.5
+			surfaceGui.Parent = wall
+			
+			local frame = Instance.new("Frame")
+			frame.Size = UDim2.new(1, 0, 1, 0)
+			frame.BackgroundColor3 = Color3.fromRGB(150, 200, 255)
+			frame.BackgroundTransparency = 0.9
+			frame.BorderSizePixel = 0
+			frame.Parent = surfaceGui
+			
+			table.insert(xRayParts, surfaceGui)
+		end
+		
+		-- Ajusta iluminação para melhor visibilidade
+		local originalBrightness = Lighting.Brightness
+		local originalOutdoorAmbient = Lighting.OutdoorAmbient
+		
+		Lighting.Brightness = math.max(Lighting.Brightness, 2)
+		Lighting.OutdoorAmbient = Color3.new(0.8, 0.8, 1)
+		
+		originalProperties["Lighting"] = {
+			Brightness = originalBrightness,
+			OutdoorAmbient = originalOutdoorAmbient
+		}
+		
+	else
+		-- Restaura propriedades originais
+		for wall, properties in pairs(originalProperties) do
+			if wall:IsA("BasePart") then
+				wall.Transparency = properties.Transparency
+				wall.Color = properties.Color
+				wall.Material = properties.Material
+				wall.CanCollide = properties.CanCollide
+			end
+		end
+		
+		-- Remove efeitos X-Ray
+		for _, effect in pairs(xRayParts) do
+			if effect and effect.Parent then
+				effect:Destroy()
+			end
+		end
+		xRayParts = {}
+		
+		-- Restaura iluminação
+		if originalProperties["Lighting"] then
+			Lighting.Brightness = originalProperties["Lighting"].Brightness
+			Lighting.OutdoorAmbient = originalProperties["Lighting"].OutdoorAmbient
+			originalProperties["Lighting"] = nil
+		end
+		
+		originalProperties = {}
+	end
+end
+
+-- Função para criar highlight especial para presentes
+local function createGiftHighlight(gift)
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "XRayGiftHighlight"
+	
+	-- Cor aleatória da lista
+	local colorIndex = math.random(1, #XRAY_SETTINGS.GIFT_COLORS)
+	highlight.FillColor = XRAY_SETTINGS.GIFT_COLORS[colorIndex]
+	highlight.FillTransparency = 0.2
+	highlight.OutlineColor = highlight.FillColor
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	
+	-- Configura o Adornee apropriadamente
+	if gift:IsA("Model") then
+		local primaryPart = gift.PrimaryPart or gift:FindFirstChildWhichIsA("BasePart")
+		if primaryPart then
+			highlight.Adornee = primaryPart
+		end
+	elseif gift:IsA("BasePart") then
+		highlight.Adornee = gift
+	end
+	
+	-- Adiciona efeito de pulso
+	spawn(function()
+		while highlight and highlight.Parent do
+			local tweenInfo = TweenInfo.new(0.8, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut)
+			local targetTransparency = math.random(0.1, 0.4)
+			
+			local tween = TweenService:Create(highlight, tweenInfo, {
+				FillTransparency = targetTransparency,
+				OutlineTransparency = math.random(0, 0.2)
+			})
+			
+			tween:Play()
+			tween.Completed:Wait()
+		end
+	end)
+	
+	return highlight
+end
+
+-- Função para encontrar e destacar todos os presentes
+local function highlightAllGifts()
+	-- Limpa highlights anteriores
+	for _, highlight in pairs(highlightInstances) do
+		if highlight then
+			highlight:Destroy()
+		end
+	end
+	highlightInstances = {}
+	
+	if not giftsFolder then return 0 end
+	
+	local giftCount = 0
+	
+	-- Procura por presentes na pasta temp
+	for _, item in pairs(giftsFolder:GetDescendants()) do
+		if item:IsA("Model") or item:IsA("BasePart") then
+			-- Verifica se parece ser um presente
+			local isGift = item.Name:lower():find("gift") or
+						  item.Name:lower():find("present") or
+						  item.Name:lower():find("box") or
+						  item.Name:lower():find("caixa") or
+						  item.Name:lower():find("presente") or
+						  (item:IsA("Model") and #item:GetChildren() > 0)
+			
+			if isGift then
+				local highlight = createGiftHighlight(item)
+				if highlight.Adornee then
+					highlight.Parent = item
+					table.insert(highlightInstances, highlight)
+					giftCount = giftCount + 1
+					
+					-- Adiciona texto flutuante
+					local billboard = Instance.new("BillboardGui")
+					billboard.Name = "GiftLabel"
+					billboard.Size = UDim2.new(0, 100, 0, 40)
+					billboard.StudsOffset = Vector3.new(0, 3, 0)
+					billboard.AlwaysOnTop = true
+					billboard.Parent = item
+					
+					local label = Instance.new("TextLabel")
+					label.Size = UDim2.new(1, 0, 1, 0)
+					label.BackgroundTransparency = 1
+					label.Text = "🎁 Presente"
+					label.TextColor3 = highlight.FillColor
+					label.TextStrokeTransparency = 0.5
+					label.Font = Enum.Font.FredokaOne
+					label.TextSize = 14
+					label.Parent = billboard
+				end
+			end
+		end
+	end
+	
+	print(giftCount .. " presentes destacados")
+	return giftCount
+end
+
+-- Modo de visão avançada (Raycast)
+local function activateAdvancedView()
+	isAdvancedView = true
+	advancedButton.BackgroundColor3 = Color3.fromRGB(50, 255, 50)
+	
+	-- Cria um raio do mouse para ver através das paredes
+	local raycastParams = RaycastParams.new()
+	raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+	raycastParams.IgnoreWater = true
+	
+	local function updateRaycast()
+		if not isAdvancedView then return end
+		
+		local mouse = player:GetMouse()
+		local origin = workspace.CurrentCamera.CFrame.Position
+		local direction = (mouse.Hit.Position - origin).Unit * 100
+		
+		raycastParams.FilterDescendantsInstances = {player.Character}
+		
+		local raycastResult = workspace:Raycast(origin, direction, raycastParams)
+		
+		if raycastResult then
+			local hitPart = raycastResult.Instance
+			-- Se atingir uma parede, aumenta temporariamente a transparência
+			if hitPart and hitPart:IsA("BasePart") then
+				if not originalProperties[hitPart] then
+					originalProperties[hitPart] = {
+						Transparency = hitPart.Transparency,
+						Color = hitPart.Color
+					}
+				end
+				
+				hitPart.Transparency = math.max(hitPart.Transparency, 0.9)
+				hitPart.Color = Color3.fromRGB(100, 150, 255)
+				
+				-- Restaura após 0.5 segundos
+				delay(0.5, function()
+					if originalProperties[hitPart] then
+						hitPart.Transparency = originalProperties[hitPart].Transparency
+						hitPart.Color = originalProperties[hitPart].Color
+						originalProperties[hitPart] = nil
+					end
+				end)
+			end
+		end
+		
+		-- Continua atualizando
+		if isAdvancedView then
+			task.wait(0.05)
+			updateRaycast()
+		end
+	end
+	
+	-- Inicia o raycast
+	spawn(updateRaycast)
+end
+
+local function deactivateAdvancedView()
+	isAdvancedView = false
+	advancedButton.BackgroundColor3 = Color3.fromRGB(255, 165, 0)
+end
+
+-- Função principal de toggle
+local function toggleXRay()
+	isXRayActive = not isXRayActive
+	
+	if isXRayActive then
+		-- Ativa modo X-Ray
+		mainButton.Text = "❌ Desativar X-RAY"
+		mainButton.BackgroundColor3 = Color3.fromRGB(255, 50, 50)
+		
+		-- Aplica efeito nas paredes
+		applyXRayToWalls(true)
+		
+		-- Destaca presentes
+		local giftCount = highlightAllGifts()
+		
+		-- Mostra botão avançado
+		advancedButton.Visible = true
+		
+		-- Mensagem de status
+		if giftCount > 0 then
+			mainButton.Text = "❌ Desativar X-RAY (" .. giftCount .. ")"
+		else
+			mainButton.Text = "❌ Desativar X-RAY (0 presentes)"
+			warn("Nenhum presente encontrado na pasta 'temp'!")
+		end
+		
+	else
+		-- Desativa modo X-Ray
+		mainButton.Text = "🔍 X-RAY Presentes"
+		mainButton.BackgroundColor3 = Color3.fromRGB(0, 100, 255)
+		
+		-- Remove efeito das paredes
+		applyXRayToWalls(false)
+		
+		-- Remove highlights
+		for _, highlight in pairs(highlightInstances) do
+			if highlight then
+				highlight:Destroy()
+			end
+		end
+		highlightInstances = {}
+		
+		-- Remove etiquetas
+		if giftsFolder then
+			for _, item in pairs(giftsFolder:GetDescendants()) do
+				local billboard = item:FindFirstChild("GiftLabel")
+				if billboard then
+					billboard:Destroy()
+				end
+			end
+		end
+		
+		-- Esconde botão avançado
+		advancedButton.Visible = false
+		deactivateAdvancedView()
+	end
+end
+
+-- Inicialização
+local function initialize()
+	giftsFolder = getTempFolder()
+	
+	if not giftsFolder then
+		mainButton.Text = "❌ Erro: Sem pasta 'temp'"
+		mainButton.AutoButtonColor = false
+		mainButton.BackgroundColor3 = Color3.fromRGB(100, 100, 100)
+		warn("Crie uma pasta chamada 'temp' no Workspace para usar este sistema!")
+		return
+	end
+	
+	print("Sistema X-Ray inicializado. Monitorando: " .. giftsFolder:GetFullName())
+	
+	-- Conecta eventos
+	mainButton.MouseButton1Click:Connect(toggleXRay)
+	advancedButton.MouseButton1Click:Connect(function()
+		if isAdvancedView then
+			deactivateAdvancedView()
+		else
+			activateAdvancedView()
+		end
+	end)
+	
+	-- Atalhos de teclado
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		
+		if input.KeyCode == Enum.KeyCode.X then
+			toggleXRay()
+		elseif input.KeyCode == Enum.KeyCode.V and isXRayActive then
+			if isAdvancedView then
+				deactivateAdvancedView()
+			else
+				activateAdvancedView()
+			end
+		end
+	end)
+	
+	-- Tooltip
+	local tooltip = Instance.new("TextLabel")
+	tooltip.Name = "Tooltip"
+	tooltip.Text = "X: Ativar/Desativar  |  V: Visão Avançada (quando ativo)"
+	tooltip.Size = UDim2.new(1, -20, 0, 30)
+	tooltip.Position = UDim2.new(0, 10, 1, 10)
+	tooltip.BackgroundTransparency = 0.8
+	tooltip.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+	tooltip.TextColor3 = Color3.fromRGB(255, 255, 255)
+	tooltip.TextSize = 12
+	tooltip.Font = Enum.Font.SourceSansBold
+	tooltip.Visible = false
+	tooltip.Parent = mainButton
+	
+	mainButton.MouseEnter:Connect(function()
+		tooltip.Visible = true
+	end)
+	
+	mainButton.MouseLeave:Connect(function()
+		tooltip.Visible = false
+	end)
+	
+	-- Monitora novos presentes enquanto X-Ray está ativo
+	giftsFolder.DescendantAdded:Connect(function(descendant)
+		if isXRayActive and (descendant:IsA("Model") or descendant:IsA("BasePart")) then
+			task.wait(0.2) -- Aguarda carregamento
+			highlightAllGifts()
+		end
+	end)
+	
+	-- Atualiza contador periodicamente
+	spawn(function()
+		while true do
+			if isXRayActive and giftsFolder then
+				local count = 0
+				for _ in pairs(giftsFolder:GetDescendants()) do
+					count = count + 1
+				end
+				mainButton.Text = "❌ Desativar X-RAY (" .. count .. " itens)"
+			end
+			task.wait(2)
+		end
+	end)
+end
+
+-- Inicia o sistema
+task.spawn(initialize)
+
+-- Limpeza
+screenGui.Destroying:Connect(function()
+	applyXRayToWalls(false)
+	deactivateAdvancedView()
+	
+	for _, highlight in pairs(highlightInstances) do
+		if highlight then
+			highlight:Destroy()
+		end
+	end
+end)
