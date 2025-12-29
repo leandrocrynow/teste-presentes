@@ -1,0 +1,324 @@
+local Players = game:GetService("Players")
+local PathfindingService = game:GetService("PathfindingService")
+local RunService = game:GetService("RunService")
+
+-- Configurações OTIMIZADAS
+local FOLLOW_DISTANCE = 3  -- Menor distância para ser mais agressivo
+local UPDATE_INTERVAL = 0.2  -- Atualização mais rápida
+local MOVE_SPEED_MULTIPLIER = 1.5  -- Multiplicador de velocidade
+local isFollowing = false
+local targetPlayer = nil
+local currentWaypointIndex = 0
+local waypoints = {}
+local isComputingPath = false
+
+-- Criar UI
+local player = game.Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "FollowerUI"
+screenGui.ResetOnSpawn = false
+
+local frame = Instance.new("Frame")
+frame.Size = UDim2.new(0, 200, 0, 300)
+frame.Position = UDim2.new(0, 10, 0, 10)
+frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+frame.Parent = screenGui
+
+local title = Instance.new("TextLabel")
+title.Text = "Seguir Jogador"
+title.Size = UDim2.new(1, 0, 0, 30)
+title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+title.TextColor3 = Color3.fromRGB(255, 255, 255)
+title.Font = Enum.Font.SourceSansBold
+title.TextSize = 16
+title.Parent = frame
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -10, 0, 200)
+scrollFrame.Position = UDim2.new(0, 5, 0, 35)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.ScrollBarThickness = 6
+scrollFrame.Parent = frame
+
+local followButton = Instance.new("TextButton")
+followButton.Text = "COMEÇAR A SEGUIR"
+followButton.Size = UDim2.new(1, -10, 0, 30)
+followButton.Position = UDim2.new(0, 5, 0, 240)
+followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+followButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+followButton.Font = Enum.Font.SourceSansBold
+followButton.TextSize = 14
+followButton.Parent = frame
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Text = "Status: Parado"
+statusLabel.Size = UDim2.new(1, -10, 0, 20)
+statusLabel.Position = UDim2.new(0, 5, 0, 275)
+statusLabel.BackgroundTransparency = 1
+statusLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+statusLabel.Font = Enum.Font.SourceSans
+statusLabel.TextSize = 14
+statusLabel.Parent = frame
+
+screenGui.Parent = playerGui
+
+-- Variáveis do pathfinding
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
+
+-- Aumentar velocidade do personagem
+if humanoid then
+    humanoid.WalkSpeed = 22 * MOVE_SPEED_MULTIPLIER
+end
+
+-- Atualizar lista de jogadores
+local function updatePlayerList()
+    for _, child in ipairs(scrollFrame:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local yOffset = 0
+    for _, otherPlayer in ipairs(Players:GetPlayers()) do
+        if otherPlayer ~= player then
+            local playerButton = Instance.new("TextButton")
+            playerButton.Text = otherPlayer.Name
+            playerButton.Size = UDim2.new(1, 0, 0, 25)
+            playerButton.Position = UDim2.new(0, 0, 0, yOffset)
+            playerButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+            playerButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+            playerButton.Font = Enum.Font.SourceSans
+            playerButton.TextSize = 14
+            
+            playerButton.MouseButton1Click:Connect(function()
+                if targetPlayer == otherPlayer then
+                    targetPlayer = nil
+                    playerButton.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                else
+                    targetPlayer = otherPlayer
+                    for _, btn in ipairs(scrollFrame:GetChildren()) do
+                        if btn:IsA("TextButton") then
+                            btn.BackgroundColor3 = Color3.fromRGB(80, 80, 80)
+                        end
+                    end
+                    playerButton.BackgroundColor3 = Color3.fromRGB(0, 120, 255)
+                end
+            end)
+            
+            playerButton.Parent = scrollFrame
+            yOffset = yOffset + 27
+        end
+    end
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, yOffset)
+end
+
+-- Controle do botão de seguir
+followButton.MouseButton1Click:Connect(function()
+    if not targetPlayer then
+        statusLabel.Text = "Selecione um jogador primeiro!"
+        return
+    end
+    
+    isFollowing = not isFollowing
+    
+    if isFollowing then
+        followButton.Text = "PARAR DE SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(170, 0, 0)
+        statusLabel.Text = "Seguindo: " .. targetPlayer.Name
+        currentWaypointIndex = 0
+        waypoints = {}
+    else
+        followButton.Text = "COMEÇAR A SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        statusLabel.Text = "Status: Parado"
+        if humanoid then
+            humanoid:MoveTo(rootPart.Position)
+        end
+        currentWaypointIndex = 0
+        waypoints = {}
+    end
+end)
+
+-- Função para calcular caminho ASSÍNCRONA (não bloqueia)
+local function computePathAsync(startPos, endPos)
+    if isComputingPath then return nil end
+    
+    isComputingPath = true
+    local path = PathfindingService:CreatePath({
+        AgentRadius = 1.5,
+        AgentHeight = 5,
+        AgentCanJump = true,
+        AgentCanClimb = true,
+        WaypointSpacing = 3,  -- Menor espaçamento para caminhos mais suaves
+        AgentCanAvoidWater = true
+    })
+    
+    local success, result = pcall(function()
+        path:ComputeAsync(startPos, endPos)
+        return path
+    end)
+    
+    isComputingPath = false
+    return success and result or nil
+end
+
+-- Função de pathfinding OTIMIZADA
+local lastPathCompute = 0
+local lastWaypointReached = 0
+
+local function followPath()
+    if not isFollowing or not targetPlayer then return end
+    
+    if not character or not character.Parent then return end
+    
+    local targetChar = targetPlayer.Character
+    if not targetChar then 
+        statusLabel.Text = "Alvo sem personagem"
+        return 
+    end
+    
+    local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
+    if not targetRoot then return end
+    
+    -- Verificar distância
+    local distance = (rootPart.Position - targetRoot.Position).Magnitude
+    if distance <= FOLLOW_DISTANCE then
+        humanoid:MoveTo(rootPart.Position)
+        currentWaypointIndex = 0
+        waypoints = {}
+        return
+    end
+    
+    -- Verificar se precisa de novo caminho
+    local now = tick()
+    local needsNewPath = false
+    
+    if #waypoints == 0 or currentWaypointIndex > #waypoints then
+        needsNewPath = true
+    elseif currentWaypointIndex > 0 and currentWaypointIndex <= #waypoints then
+        local currentWaypoint = waypoints[currentWaypointIndex]
+        local waypointDistance = (rootPart.Position - currentWaypoint.Position).Magnitude
+        
+        -- Se chegou próximo ao waypoint, avançar para o próximo
+        if waypointDistance < 2.5 then
+            currentWaypointIndex = currentWaypointIndex + 1
+            lastWaypointReached = now
+        end
+        
+        -- Se está há muito tempo no mesmo waypoint, recalcular
+        if now - lastWaypointReached > 1.5 then
+            needsNewPath = true
+        end
+    end
+    
+    -- Calcular novo caminho se necessário
+    if needsNewPath and now - lastPathCompute > UPDATE_INTERVAL then
+        lastPathCompute = now
+        
+        -- Calcular em paralelo para não bloquear
+        task.spawn(function()
+            local path = computePathAsync(rootPart.Position, targetRoot.Position)
+            
+            if path and path.Status == Enum.PathStatus.Success then
+                waypoints = path:GetWaypoints()
+                currentWaypointIndex = 1
+                lastWaypointReached = now
+            else
+                -- Fallback: mover diretamente
+                waypoints = {}
+                currentWaypointIndex = 0
+                humanoid:MoveTo(targetRoot.Position)
+            end
+        end)
+    end
+    
+    -- Seguir para o waypoint atual
+    if currentWaypointIndex > 0 and currentWaypointIndex <= #waypoints then
+        local waypoint = waypoints[currentWaypointIndex]
+        
+        -- Pular se necessário
+        if waypoint.Action == Enum.PathWaypointAction.Jump then
+            humanoid.Jump = true
+        end
+        
+        -- Mover para o waypoint
+        humanoid:MoveTo(waypoint.Position)
+        
+        -- Verificar obstáculos próximos e pular se necessário
+        local rayOrigin = rootPart.Position
+        local rayDirection = (waypoint.Position - rayOrigin).Unit * 5
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterDescendantsInstances = {character}
+        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+        
+        local rayResult = workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+        if rayResult then
+            if rayResult.Instance then
+                local normal = rayResult.Normal
+                if math.abs(normal.Y) < 0.3 then -- Parede inclinada
+                    humanoid.Jump = true
+                end
+            end
+        end
+    elseif #waypoints == 0 then
+        -- Se não há waypoints, mover diretamente
+        humanoid:MoveTo(targetRoot.Position)
+    end
+end
+
+-- Atualizar quando jogadores entrarem/saírem
+Players.PlayerAdded:Connect(updatePlayerList)
+Players.PlayerRemoving:Connect(function(leavingPlayer)
+    if leavingPlayer == targetPlayer then
+        targetPlayer = nil
+        isFollowing = false
+        followButton.Text = "COMEÇAR A SEGUIR"
+        followButton.BackgroundColor3 = Color3.fromRGB(0, 170, 0)
+        statusLabel.Text = "Alvo saiu do jogo"
+        currentWaypointIndex = 0
+        waypoints = {}
+    end
+    updatePlayerList()
+end)
+
+-- Reconfigurar quando o personagem respawnar
+player.CharacterAdded:Connect(function(newChar)
+    character = newChar
+    humanoid = newChar:WaitForChild("Humanoid")
+    rootPart = newChar:WaitForChild("HumanoidRootPart")
+    
+    -- Aumentar velocidade novamente
+    if humanoid then
+        humanoid.WalkSpeed = 22 * MOVE_SPEED_MULTIPLIER
+    end
+    
+    -- Resetar estado
+    currentWaypointIndex = 0
+    waypoints = {}
+end)
+
+-- Loop principal RÁPIDO usando Heartbeat
+RunService.Heartbeat:Connect(function()
+    if character and character.Parent then
+        followPath()
+    end
+end)
+
+-- Inicializar
+updatePlayerList()
+
+-- Fechar a UI com tecla
+local UserInputService = game:GetService("UserInputService")
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if input.KeyCode == Enum.KeyCode.H and not gameProcessed then
+        frame.Visible = not frame.Visible
+    end
+end)
+
+-- Mensagem inicial
+print("Sistema de seguir jogadores carregado!")
+print("Pressione H para mostrar/esconder a UI")
