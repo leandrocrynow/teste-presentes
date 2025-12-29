@@ -1,0 +1,145 @@
+-- Sistema Simples de Lista de Presentes com Teleporte
+local Players = game:GetService("Players")
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Interface
+local screenGui = Instance.new("ScreenGui")
+screenGui.Parent = playerGui
+
+-- Botão
+local toggleBtn = Instance.new("TextButton")
+toggleBtn.Size = UDim2.new(0, 160, 0, 50)
+toggleBtn.Position = UDim2.new(0, 20, 1, -60)
+toggleBtn.BackgroundColor3 = Color3.fromRGB(0, 120, 215)
+toggleBtn.TextColor3 = Color3.white
+toggleBtn.Text = "📦 Ver Presentes"
+toggleBtn.Font = Enum.Font.SourceSansBold
+toggleBtn.TextSize = 18
+toggleBtn.Parent = screenGui
+
+-- Painel da Lista
+local listFrame = Instance.new("Frame")
+listFrame.Size = UDim2.new(0, 300, 0, 400)
+listFrame.Position = UDim2.new(0, 20, 0.5, -200)
+listFrame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+listFrame.Visible = false
+listFrame.Parent = screenGui
+
+local scrollFrame = Instance.new("ScrollingFrame")
+scrollFrame.Size = UDim2.new(1, -10, 1, -50)
+scrollFrame.Position = UDim2.new(0, 5, 0, 5)
+scrollFrame.BackgroundTransparency = 1
+scrollFrame.Parent = listFrame
+
+local listLayout = Instance.new("UIListLayout")
+listLayout.Padding = UDim.new(0, 5)
+listLayout.Parent = scrollFrame
+
+local title = Instance.new("TextLabel")
+title.Size = UDim2.new(1, 0, 0, 40)
+title.Position = UDim2.new(0, 0, 1, -45)
+title.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+title.Text = "Presentes: 0"
+title.TextColor3 = Color3.white
+title.Font = Enum.Font.SourceSansBold
+title.Parent = listFrame
+
+-- Variáveis
+local gifts = {}
+local tempFolder = workspace:FindFirstChild("temp")
+
+-- Função para teleportar
+local function teleportTo(gift)
+    if not player.Character or not player.Character:FindFirstChild("HumanoidRootPart") then return end
+    
+    local root = player.Character.HumanoidRootPart
+    local targetPos
+    
+    if gift:IsA("Model") and gift.PrimaryPart then
+        targetPos = gift.PrimaryPart.Position + Vector3.new(0, 5, 0)
+    elseif gift:IsA("BasePart") then
+        targetPos = gift.Position + Vector3.new(0, 5, 0)
+    else
+        return
+    end
+    
+    root.CFrame = CFrame.new(targetPos)
+end
+
+-- Função para criar item na lista
+local function createListItem(gift)
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, -10, 0, 50)
+    btn.BackgroundColor3 = Color3.fromRGB(60, 60, 70)
+    btn.Text = gift.Name
+    btn.TextColor3 = Color3.white
+    btn.Font = Enum.Font.SourceSans
+    btn.TextSize = 16
+    btn.TextXAlignment = Enum.TextXAlignment.Left
+    btn.Parent = scrollFrame
+    
+    btn.MouseButton1Click:Connect(function()
+        teleportTo(gift)
+    end)
+    
+    gifts[gift] = btn
+end
+
+-- Função para atualizar lista
+local function updateList()
+    -- Limpa lista
+    for _, btn in pairs(gifts) do
+        btn:Destroy()
+    end
+    gifts = {}
+    
+    -- Procura presentes
+    if tempFolder then
+        for _, item in pairs(tempFolder:GetDescendants()) do
+            if item:IsA("Model") or item:IsA("BasePart") then
+                createListItem(item)
+            end
+        end
+    end
+    
+    -- Atualiza contador
+    title.Text = "Presentes: " .. #scrollFrame:GetChildren() - 1
+    scrollFrame.CanvasSize = UDim2.new(0, 0, 0, listLayout.AbsoluteContentSize.Y)
+end
+
+-- Toggle da lista
+toggleBtn.MouseButton1Click:Connect(function()
+    listFrame.Visible = not listFrame.Visible
+    toggleBtn.Text = listFrame.Visible and "❌ Fechar" or "📦 Ver Presentes"
+    
+    if listFrame.Visible then
+        updateList()
+    end
+end)
+
+-- Monitora novos presentes
+if tempFolder then
+    tempFolder.DescendantAdded:Connect(function(item)
+        if listFrame.Visible and (item:IsA("Model") or item:IsA("BasePart")) then
+            task.wait(0.1)
+            updateList()
+        end
+    end)
+    
+    tempFolder.DescendantRemoving:Connect(function(item)
+        if gifts[item] and listFrame.Visible then
+            updateList()
+        end
+    end)
+else
+    toggleBtn.Text = "❌ Sem pasta 'temp'"
+    toggleBtn.AutoButtonColor = false
+end
+
+-- Atalho de tecla
+game:GetService("UserInputService").InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.P then
+        toggleBtn:Activate()
+    end
+end)
