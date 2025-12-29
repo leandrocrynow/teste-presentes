@@ -1,0 +1,541 @@
+-- Coloque este script em um ScreenGui (LocalScript)
+local Players = game:GetService("Players")
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+
+local player = Players.LocalPlayer
+local playerGui = player:WaitForChild("PlayerGui")
+
+-- Criação da interface
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "GiftHighlightGUI"
+screenGui.Parent = playerGui
+
+-- Criação do botão
+local highlightButton = Instance.new("TextButton")
+highlightButton.Name = "HighlightButton"
+highlightButton.Size = UDim2.new(0, 150, 0, 50)
+highlightButton.Position = UDim2.new(1, -160, 1, -60)
+highlightButton.AnchorPoint = Vector2.new(0, 0)
+highlightButton.BackgroundColor3 = Color3.fromRGB(37, 136, 56)
+highlightButton.TextColor3 = Color3.fromRGB(255, 255, 255)
+highlightButton.Text = "🎁 Ver Presentes"
+highlightButton.Font = Enum.Font.FredokaOne
+highlightButton.TextSize = 18
+highlightButton.BorderSizePixel = 0
+highlightButton.AutoButtonColor = true
+highlightButton.Parent = screenGui
+
+-- Estilização
+local uiCorner = Instance.new("UICorner")
+uiCorner.CornerRadius = UDim.new(0, 12)
+uiCorner.Parent = highlightButton
+
+local uiStroke = Instance.new("UIStroke")
+uiStroke.Color = Color3.fromRGB(255, 255, 255)
+uiStroke.Thickness = 2
+uiStroke.Parent = highlightButton
+
+-- Variáveis de controle
+local isHighlightActive = false
+local highlightInstances = {}
+local originalProperties = {}
+local isMonitoring = false
+local giftsFolder = nil
+local connection = nil
+
+-- Cache de presentes já processados
+local processedGifts = {}
+
+-- Função para obter ou criar a pasta temp
+local function getGiftsFolder()
+	local workspace = game:GetService("Workspace")
+	
+	-- Tenta encontrar a pasta temp
+	if workspace:FindFirstChild("temp") then
+		return workspace.temp
+	else
+		-- Cria a pasta temp se não existir
+		local tempFolder = Instance.new("Folder")
+		tempFolder.Name = "temp"
+		tempFolder.Parent = workspace
+		print("Pasta 'temp' criada automaticamente")
+		return tempFolder
+	end
+end
+
+-- Função para criar highlight em um presente específico
+local function createGiftHighlight(gift)
+	-- Evita processar o mesmo presente duas vezes
+	if processedGifts[gift] then
+		return processedGifts[gift]
+	end
+	
+	local highlight = Instance.new("Highlight")
+	highlight.Name = "GiftHighlight_" .. gift.Name
+	highlight.FillColor = Color3.fromRGB(255, 215, 0) -- Dourado
+	highlight.FillTransparency = 0.3
+	highlight.OutlineColor = Color3.fromRGB(255, 165, 0) -- Laranja
+	highlight.OutlineTransparency = 0
+	highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+	
+	-- Determina o Adornee apropriado
+	if gift:IsA("Model") then
+		local primaryPart = gift.PrimaryPart or gift:FindFirstChildWhichIsA("BasePart")
+		if primaryPart then
+			highlight.Adornee = primaryPart
+		else
+			-- Se não tiver PrimaryPart, usa o primeiro BasePart
+			for _, child in pairs(gift:GetChildren()) do
+				if child:IsA("BasePart") then
+					highlight.Adornee = child
+					break
+				end
+			end
+		end
+	elseif gift:IsA("BasePart") then
+		highlight.Adornee = gift
+	end
+	
+	-- Salva no cache
+	processedGifts[gift] = highlight
+	
+	-- Adiciona efeito de brilho pulsante
+	if isHighlightActive then
+		local tweenInfo = TweenInfo.new(
+			1,
+			Enum.EasingStyle.Sine,
+			Enum.EasingDirection.InOut,
+			-1,
+			true,
+			0
+		)
+		
+		local tween = TweenService:Create(highlight, tweenInfo, {
+			FillTransparency = 0.6,
+			OutlineTransparency = 0.5
+		})
+		
+		tween:Play()
+		highlight.Parent = gift
+		table.insert(highlightInstances, highlight)
+	end
+	
+	return highlight
+end
+
+-- Função para processar todos os presentes na pasta temp
+local function processAllGifts()
+	local gifts = {}
+	
+	if giftsFolder then
+		-- Processa todos os filhos da pasta temp
+		for _, gift in pairs(giftsFolder:GetChildren()) do
+			-- Aceita Modelos, Partes ou qualquer objeto que possa conter presentes
+			if gift:IsA("Model") or gift:IsA("BasePart") then
+				table.insert(gifts, gift)
+				createGiftHighlight(gift)
+			end
+			
+			-- Se for uma pasta, procura dentro dela também
+			if gift:IsA("Folder") then
+				for _, child in pairs(gift:GetDescendants()) do
+					if child:IsA("Model") or child:IsA("BasePart") then
+						table.insert(gifts, child)
+						createGiftHighlight(child)
+					end
+				end
+			end
+			
+			-- Procura por partes com nomes de presente em modelos complexos
+			if gift:IsA("Model") then
+				for _, child in pairs(gift:GetDescendants()) do
+					if child:IsA("BasePart") and (
+						child.Name:lower():find("gift") or 
+						child.Name:lower():find("present") or
+						child.Name:lower():find("box") or
+						child.Name:lower():find("caixa") or
+						child.Name:lower():find("presente")
+					) then
+						createGiftHighlight(child)
+					end
+				end
+			end
+		end
+	end
+	
+	print(#gifts .. " presentes encontrados na pasta temp")
+	return gifts
+end
+
+-- Função para monitorar novos presentes na pasta temp
+local function startMonitoring()
+	if isMonitoring or not giftsFolder then
+		return
+	end
+	
+	isMonitoring = true
+	
+	-- Função para adicionar highlight a um novo presente
+	local function addHighlightToNewChild(child)
+		-- Pequeno delay para garantir que o modelo esteja completamente carregado
+		task.wait(0.1)
+		
+		if child:IsA("Model") or child:IsA("BasePart") then
+			print("Novo presente detectado em temp: " .. child.Name)
+			
+			-- Se o highlight estiver ativo, aplica imediatamente
+			if isHighlightActive then
+				local highlight = createGiftHighlight(child)
+				if highlight then
+					highlight.Parent = child
+					table.insert(highlightInstances, highlight)
+					
+					-- Adiciona efeito de brilho
+					local tweenInfo = TweenInfo.new(
+						1,
+						Enum.EasingStyle.Sine,
+						Enum.EasingDirection.InOut,
+						-1,
+						true,
+						0
+					)
+					
+					local tween = TweenService:Create(highlight, tweenInfo, {
+						FillTransparency = 0.6,
+						OutlineTransparency = 0.5
+					})
+					
+					tween:Play()
+				end
+			end
+		end
+		
+		-- Se for um modelo, também monitora seus descendentes
+		if child:IsA("Model") then
+			child.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("BasePart") and (
+					descendant.Name:lower():find("gift") or 
+					descendant.Name:lower():find("present") or
+					descendant.Name:lower():find("box")
+				) then
+					if isHighlightActive then
+						createGiftHighlight(descendant)
+					end
+				end
+			end)
+		end
+		
+		-- Se for uma pasta, monitora dentro dela também
+		if child:IsA("Folder") then
+			child.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("Model") or descendant:IsA("BasePart") then
+					addHighlightToNewChild(descendant)
+				end
+			end)
+		end
+	end
+	
+	-- Conecta o evento ChildAdded para detectar novos presentes
+	connection = giftsFolder.ChildAdded:Connect(addHighlightToNewChild)
+	
+	-- Monitora todas as subpastas existentes
+	for _, child in pairs(giftsFolder:GetChildren()) do
+		if child:IsA("Folder") then
+			child.DescendantAdded:Connect(function(descendant)
+				if descendant:IsA("Model") or descendant:IsA("BasePart") then
+					addHighlightToNewChild(descendant)
+				end
+			end)
+		end
+	end
+	
+	-- Também monitora o evento ChildRemoved para limpar o cache
+	giftsFolder.ChildRemoved:Connect(function(child)
+		-- Remove do cache se existir
+		if processedGifts[child] then
+			if processedGifts[child] and processedGifts[child].Parent then
+				processedGifts[child]:Destroy()
+			end
+			processedGifts[child] = nil
+			
+			-- Remove da lista de highlights ativos
+			for i, highlight in ipairs(highlightInstances) do
+				if highlight and highlight.Name == "GiftHighlight_" .. child.Name then
+					table.remove(highlightInstances, i)
+					break
+				end
+			end
+		end
+	end)
+	
+	print("Monitoramento da pasta 'temp' ativado")
+end
+
+-- Função para parar o monitoramento
+local function stopMonitoring()
+	if connection then
+		connection:Disconnect()
+		connection = nil
+	end
+	isMonitoring = false
+	print("Monitoramento da pasta 'temp' desativado")
+end
+
+-- Função para ajustar transparência das paredes (versão otimizada)
+local function adjustWallTransparency(enable)
+	local workspace = game:GetService("Workspace")
+	
+	-- Cache para paredes já processadas
+	local wallCache = {}
+	
+	for _, wall in pairs(workspace:GetDescendants()) do
+		if wall:IsA("BasePart") then
+			-- Identifica paredes por nome ou material
+			local isWall = wall.Name:lower():find("wall") or 
+						   wall.Name:lower():find("parede") or
+						   wall.Name:lower():find("muro") or
+						   wall.Name:lower():find("wall") or
+						   wall.Material == EnumMaterial.Plastic or
+						   wall.Material == EnumMaterial.Wood or
+						   wall.Material == EnumMaterial.Concrete or
+						   wall.Material == EnumMaterial.Brick
+			
+			if isWall then
+				table.insert(wallCache, wall)
+			end
+		end
+	end
+	
+	-- Aplica transparência em lotes para melhor performance
+	for _, wall in pairs(wallCache) do
+		if enable then
+			-- Salva propriedades originais
+			if not originalProperties[wall] then
+				originalProperties[wall] = {
+					Transparency = wall.Transparency,
+					LocalTransparencyModifier = wall.LocalTransparencyModifier
+				}
+			end
+			
+			-- Aplica transparência gradual
+			wall.Transparency = math.min(wall.Transparency + 0.6, 0.85)
+			wall.LocalTransparencyModifier = 0.5
+			
+		else
+			-- Restaura propriedades originais
+			if originalProperties[wall] then
+				wall.Transparency = originalProperties[wall].Transparency
+				wall.LocalTransparencyModifier = originalProperties[wall].LocalTransparencyModifier
+				originalProperties[wall] = nil
+			end
+		end
+	end
+	
+	print((enable and "Ativada" or "Desativada") .. " transparência em " .. #wallCache .. " paredes")
+end
+
+-- Função para ativar todos os highlights
+local function activateHighlights()
+	-- Processa todos os presentes existentes
+	local gifts = processAllGifts()
+	
+	-- Ativa o highlight em todos os presentes processados
+	for gift, highlight in pairs(processedGifts) do
+		if gift and gift.Parent and highlight then
+			highlight.Parent = gift
+			table.insert(highlightInstances, highlight)
+			
+			-- Adiciona efeito de brilho
+			local tweenInfo = TweenInfo.new(
+				1,
+				Enum.EasingStyle.Sine,
+				Enum.EasingDirection.InOut,
+				-1,
+				true,
+				0
+			)
+			
+			local tween = TweenService:Create(highlight, tweenInfo, {
+				FillTransparency = 0.6,
+				OutlineTransparency = 0.5
+			})
+			
+			tween:Play()
+		end
+	end
+	
+	print(#gifts .. " presentes destacados")
+end
+
+-- Função para desativar todos os highlights
+local function deactivateHighlights()
+	-- Remove todos os highlights
+	for _, highlight in pairs(highlightInstances) do
+		if highlight and highlight.Parent then
+			highlight:Destroy()
+		end
+	end
+	
+	highlightInstances = {}
+	
+	-- Limpa apenas os highlights dos itens removidos
+	for gift, highlight in pairs(processedGifts) do
+		if not gift.Parent then
+			if highlight then
+				highlight:Destroy()
+			end
+			processedGifts[gift] = nil
+		end
+	end
+	
+	print("Highlights desativados")
+end
+
+-- Função principal para ativar/desativar o highlight
+local function toggleHighlight()
+	isHighlightActive = not isHighlightActive
+	
+	if isHighlightActive then
+		-- Ativa o modo
+		highlightButton.Text = "❌ Fechar"
+		highlightButton.BackgroundColor3 = Color3.fromRGB(220, 20, 60)
+		
+		-- Ajusta transparência das paredes
+		adjustWallTransparency(true)
+		
+		-- Ativa os highlights
+		activateHighlights()
+		
+		-- Inicia o monitoramento se não estiver ativo
+		startMonitoring()
+		
+	else
+		-- Desativa o modo
+		highlightButton.Text = "🎁 Ver Presentes"
+		highlightButton.BackgroundColor3 = Color3.fromRGB(37, 136, 56)
+		
+		-- Remove transparência das paredes
+		adjustWallTransparency(false)
+		
+		-- Desativa os highlights
+		deactivateHighlights()
+	end
+end
+
+-- Inicialização
+local function initialize()
+	-- Obtém a pasta temp
+	giftsFolder = getGiftsFolder()
+	
+	if not giftsFolder then
+		warn("Não foi possível encontrar ou criar a pasta 'temp'!")
+		highlightButton.Text = "❌ Erro"
+		highlightButton.AutoButtonColor = false
+		return
+	end
+	
+	print("Sistema de highlight inicializado. Monitorando pasta: " .. giftsFolder:GetFullName())
+	
+	-- Processa os presentes existentes uma vez (para cache)
+	processAllGifts()
+	
+	-- Conecta o clique do botão
+	highlightButton.MouseButton1Click:Connect(toggleHighlight)
+	
+	-- Tecla de atalho opcional (H)
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if not gameProcessed and input.KeyCode == Enum.KeyCode.H then
+			toggleHighlight()
+		end
+	end)
+	
+	-- Configura tooltip no botão
+	local tooltip = Instance.new("TextLabel")
+	tooltip.Name = "Tooltip"
+	tooltip.Text = "Pressione H para atalho | Pasta: temp"
+	tooltip.Size = UDim2.new(1, 0, 0, 20)
+	tooltip.Position = UDim2.new(0, 0, 1, 5)
+	tooltip.BackgroundTransparency = 1
+	tooltip.TextColor3 = Color3.fromRGB(200, 200, 200)
+	tooltip.TextSize = 12
+	tooltip.Font = Enum.Font.SourceSans
+	tooltip.Visible = false
+	tooltip.Parent = highlightButton
+	
+	-- Mostra tooltip quando o mouse passar sobre o botão
+	highlightButton.MouseEnter:Connect(function()
+		tooltip.Visible = true
+	end)
+	
+	highlightButton.MouseLeave:Connect(function()
+		tooltip.Visible = false
+	end)
+	
+	-- Botão secundário para recarregar (útil para debugging)
+	local reloadButton = Instance.new("TextButton")
+	reloadButton.Name = "ReloadButton"
+	reloadButton.Size = UDim2.new(0, 30, 0, 30)
+	reloadButton.Position = UDim2.new(1, -35, 1, -100)
+	reloadButton.BackgroundColor3 = Color3.fromRGB(66, 135, 245)
+	reloadButton.Text = "↻"
+	reloadButton.TextColor3 = Color3.white
+	reloadButton.Font = Enum.Font.FredokaOne
+	reloadButton.TextSize = 18
+	reloadButton.BorderSizePixel = 0
+	reloadButton.AutoButtonColor = true
+	reloadButton.Visible = false -- Oculto por padrão
+	reloadButton.Parent = screenGui
+	
+	UICorner.new():Clone().Parent = reloadButton
+	
+	-- Atalho Ctrl+R para mostrar/ocultar botão de recarregar
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if not gameProcessed and input.KeyCode == Enum.KeyCode.R and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+			reloadButton.Visible = not reloadButton.Visible
+		end
+	end)
+	
+	reloadButton.MouseButton1Click:Connect(function()
+		print("Recarregando sistema de highlight...")
+		deactivateHighlights()
+		processedGifts = {}
+		processAllGifts()
+		
+		if isHighlightActive then
+			activateHighlights()
+		end
+	end)
+end
+
+-- Inicializa quando o script carregar
+task.spawn(initialize)
+
+-- Limpeza quando o script for destruído
+screenGui.Destroying:Connect(function()
+	stopMonitoring()
+	adjustWallTransparency(false)
+	deactivateHighlights()
+	
+	-- Limpa cache
+	processedGifts = {}
+end)
+
+-- Função para debug: Mostrar quantidade de presentes
+local function debugInfo()
+	print("=== DEBUG INFO ===")
+	print("Pasta temp encontrada:", giftsFolder and "Sim" or "Não")
+	print("Presentes em cache:", #processedGifts)
+	print("Highlights ativos:", #highlightInstances)
+	print("Monitoramento ativo:", isMonitoring)
+	print("Highlight ativo:", isHighlightActive)
+	print("=================")
+end
+
+-- Atalho Ctrl+I para informações de debug
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+	if not gameProcessed and input.KeyCode == Enum.KeyCode.I and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
+		debugInfo()
+	end
+end)
